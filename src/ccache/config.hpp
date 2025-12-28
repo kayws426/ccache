@@ -45,6 +45,7 @@ enum class CompilerType {
   icx_cl,
   msvc,
   nvcc,
+  ti_compiler,
   other
 };
 

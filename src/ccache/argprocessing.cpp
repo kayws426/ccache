@@ -621,6 +621,33 @@ process_option_arg(const Context& ctx,
     return Statistic::none;
   }
 
+  if (arg == "--compile_only") { // for ti_compiler
+    state.found_c_opt = args[i];
+    return Statistic::none;
+  }
+
+  if (util::starts_with(arg, "--c_file=")) { // for ti_compiler
+    state.input_files.emplace_back(arg.substr(9));
+    return Statistic::none;
+  }
+
+  if (util::starts_with(arg, "--output_file=")) { // for ti_compiler
+    args_info.output_obj = arg.substr(14);
+    return Statistic::none;
+  }
+
+  if ((arg == "--preproc_dependency") || (util::starts_with(arg, "-ppd"))) { // for ti_compiler
+    args_info.generating_dependencies = true;
+    return Statistic::none;
+  }
+
+  if ((arg == "-ppo") || (arg == "--preproc_only") ||
+      (arg == "-ppc") || (arg == "--preproc_with_comment") ||
+      (arg == "-ppl") || (arg == "--preproc_with_line")) { // for ti_compiler
+    state.add_common_arg(args[i]);
+    return Statistic::called_for_preprocessing;
+  }
+
   if (config.is_compiler_group_msvc()) {
     // MSVC /Fo with no space.
     if (util::starts_with(arg, "-Fo")) {

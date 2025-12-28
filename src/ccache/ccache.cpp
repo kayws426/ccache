@@ -337,6 +337,13 @@ do_guess_compiler(const fs::path& path)
   } else if (name == "cl") {
     return CompilerType::msvc;
   } else {
+    const auto path_str = util::to_lowercase(path.filename().string());
+    if (path_str.find("armcl") != std::string_view::npos
+        || path_str.find("cl6x") != std::string_view::npos
+        || path_str.find("cl430") != std::string_view::npos
+        || path_str.find("cl2000") != std::string_view::npos) {
+      return CompilerType::ti_compiler;
+    }
     return CompilerType::other;
   }
 }
@@ -1241,6 +1248,8 @@ to_cache(Context& ctx,
 {
   if (ctx.config.is_compiler_group_msvc()) {
     args.push_back(fmt::format("-Fo{}", ctx.args_info.output_obj));
+  } else if (ctx.config.compiler_type() == CompilerType::ti_compiler) {
+    args.push_back(fmt::format("--output_file={}", ctx.args_info.output_obj));
   } else {
     args.push_back("-o");
     args.push_back(ctx.args_info.output_obj);
@@ -1546,6 +1555,19 @@ get_result_key_from_cpp(Context& ctx, util::Args& args, Hash& hash)
     if (ctx.config.is_compiler_group_msvc()) {
       args.push_back("-P");
       args.push_back(FMT("-Fi{}", preprocessed_path));
+    } else if (ctx.config.compiler_type() == CompilerType::ti_compiler) {
+      args.erase_with_prefix("--compile_only");
+      args.erase_with_prefix("-c");
+      args.erase_with_prefix("--preproc_with_compile");
+      args.erase_with_prefix("-ppa");
+      args.erase_with_prefix("--preproc_dependency");
+      args.erase_with_prefix("-ppd");
+      if (ctx.config.keep_comments_cpp()) {
+        args.erase_with_prefix("-C");
+        args.push_back("--preproc_with_comment");
+      }
+      args.push_back("--preproc_with_line");
+      args.push_back(FMT("--output_file={}", preprocessed_path));
     } else {
       args.push_back("-E");
       if (!is_clang_cu) {
@@ -2748,6 +2770,17 @@ find_compiler(Context& ctx,
               const FindExecutableFunction& find_executable_function,
               bool masquerading_as_compiler)
 {
+  // replace backslashes to forward slashes
+  if (ctx.orig_args[0].find("\\") != std::string::npos) {
+    std::string orig_args0(ctx.orig_args[0]);
+    std::string::size_type pos;
+    while ((pos = orig_args0.find("\\")) != std::string::npos) {
+      orig_args0.replace(pos, 1, "/");
+    }
+    ctx.orig_args[0] = orig_args0;
+    LOG("find_compiler: replace backslashes to forward slashes on orig_args[0]: {}", ctx.orig_args[0]);
+  }
+
   // Support user override of the compiler.
   const std::string compiler =
     !ctx.config.compiler().empty()

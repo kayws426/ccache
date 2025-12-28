@@ -426,6 +426,7 @@ get_version_text(const std::string_view ccache_name)
     features.emplace_back("avx2");
   }
   std::sort(features.begin(), features.end());
+  features.emplace_back("ti_compiler(Experimental)");
   return FMT(
     VERSION_TEXT, ccache_name, CCACHE_VERSION, util::join(features, " "));
 }
