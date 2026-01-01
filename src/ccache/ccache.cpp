@@ -1563,7 +1563,6 @@ get_result_key_from_cpp(Context& ctx, util::Args& args, Hash& hash)
       args.erase_with_prefix("--preproc_dependency");
       args.erase_with_prefix("-ppd");
       if (ctx.config.keep_comments_cpp()) {
-        args.erase_with_prefix("-C");
         args.push_back("--preproc_with_comment");
       }
       args.push_back("--preproc_with_line");
@@ -2770,15 +2769,10 @@ find_compiler(Context& ctx,
               const FindExecutableFunction& find_executable_function,
               bool masquerading_as_compiler)
 {
-  // replace backslashes to forward slashes
+  // replace backslashes to forward slashes on orig_args[0]
   if (ctx.orig_args[0].find("\\") != std::string::npos) {
-    std::string orig_args0(ctx.orig_args[0]);
-    std::string::size_type pos;
-    while ((pos = orig_args0.find("\\")) != std::string::npos) {
-      orig_args0.replace(pos, 1, "/");
-    }
-    ctx.orig_args[0] = orig_args0;
-    LOG("find_compiler: replace backslashes to forward slashes on orig_args[0]: {}", ctx.orig_args[0]);
+    std::string& orig_args0(ctx.orig_args[0]);
+    std::replace(orig_args0.begin(), orig_args0.end(), '\\', '/');
   }
 
   // Support user override of the compiler.

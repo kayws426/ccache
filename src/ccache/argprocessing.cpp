@@ -164,6 +164,110 @@ private:
 };
 
 bool
+is_mswin_path_abs(const std::string_view& path_sv)
+{
+  // On Windows, a path is considered absolute if it starts with a drive letter
+  // followed by a colon and a (back)slash.
+  if ((path_sv.length() >= 3) && (path_sv[1] == ':')
+      && ((path_sv[2] == '/') || (path_sv[2] == '\\'))
+      && iswalpha(path_sv[0])) {
+    return true;
+  }
+  return false;
+}
+
+fs::path
+make_normal_path(const fs::path& path)
+{
+  std::string path_str(util::pstr(path).str());
+  // convert backslash to slash
+  std::replace(path_str.begin(), path_str.end(), '\\', '/');
+  auto slash_path = fs::path(path_str);
+  auto normalized_path = slash_path.lexically_normal();
+  return normalized_path;
+}
+
+std::string
+make_msys_path(const fs::path& path)
+{
+  std::string path_str(path.string());
+  auto path_str_length = path_str.length();
+  // convert  mswin-style absolute path to msys-style absolute path.
+  if ((path_str_length >= 3)   // check mimimum length
+      && iswalpha(path_str[0]) // drive letter should be alphabetic
+      && (path_str[1] == ':')  // drive separator should be a colon
+      && ((path_str[2] == '/')
+          || (path_str[2] == '\\'))) // should be a (back)slash
+  {
+    if (path_str[2] == '\\') {
+      // convert backslash to slash
+      std::replace(path_str.begin(), path_str.end(), '\\', '/');
+    }
+    path_str[1] = tolower(path_str[0]); // drive letter to lower case
+    path_str[0] = '/';
+  } else {
+    if (path_str_length == 0) {
+      path_str = "."; // default to current-dir if no path provided.
+    }
+  }
+  return path_str;
+}
+
+std::string
+make_mswin_path(const fs::path& path)
+{
+  std::string path_str(path.string());
+  auto path_str_length = path_str.length();
+  // convert msys-style absolute path to mswin-style absolute path.
+  if ((path_str_length >= 3)   // check mimimum length
+      && (path_str[0] == '/')  // should be a slash
+      && iswalpha(path_str[1]) // drive letter should be alphabetic
+      && (path_str[2] == '/')) // should be a slash
+  {
+    path_str[0] = toupper(path_str[1]); // drive letter to upper case
+    path_str[1] = ':';
+  } else {
+    if (path_str_length == 0) {
+      path_str = "."; // default to current-dir if no path provided.
+    }
+  }
+  return path_str;
+}
+
+fs::path
+msys_relative_path(const Context& ctx, const fs::path& path)
+{
+  const std::string& cwd_str = util::pstr(ctx.actual_cwd).str();
+  if (cwd_str.length() >= 5) { // check mimimum length
+    auto pos2 = cwd_str.find('/', 4);
+    if (pos2 != std::string::npos) {
+      auto cwd_path_start = cwd_str.substr(0, pos2 + 1);
+      if (util::starts_with(util::pstr(path).str(), cwd_path_start)) {
+        auto relpath =
+          util::make_relative_path(ctx.actual_cwd, ctx.apparent_cwd, path);
+        return relpath;
+      }
+    }
+  }
+  return path;
+}
+
+fs::path
+msys_make_relative_path(const Context& ctx, const fs::path& path)
+{
+  auto normalized_path = make_normal_path(path);
+  if (is_mswin_path_abs(util::pstr(normalized_path).str())) {
+    // if given path is a mswin absolute path, convert it to msys-style.
+    auto msys_path = make_msys_path(path);
+    auto relpath = msys_relative_path(ctx, msys_path);
+    // convert back to mswin-style.
+    return make_mswin_path(relpath);
+  } else {
+    return msys_relative_path(ctx, normalized_path);
+  }
+}
+
+bool
 color_output_possible()
 {
   const char* term_env = getenv("TERM");
@@ -621,31 +725,73 @@ process_option_arg(const Context& ctx,
     return Statistic::none;
   }
 
-  if (arg == "--compile_only") { // for ti_compiler
-    state.found_c_opt = args[i];
-    return Statistic::none;
-  }
+  // Handle arguments for ti_compiler
+  if (ctx.config.compiler_type() == CompilerType::ti_compiler) {
+    if (arg == "--compile_only") {
+      state.found_c_opt = args[i];
+      return Statistic::none;
+    }
 
-  if (util::starts_with(arg, "--c_file=")) { // for ti_compiler
-    state.input_files.emplace_back(arg.substr(9));
-    return Statistic::none;
-  }
+    if (util::starts_with(arg, "--c_file=")) {
+      auto relpath = msys_make_relative_path(ctx, arg.substr(9));
+      state.input_files.emplace_back(relpath);
+      return Statistic::none;
+    }
 
-  if (util::starts_with(arg, "--output_file=")) { // for ti_compiler
-    args_info.output_obj = arg.substr(14);
-    return Statistic::none;
-  }
+    if (util::starts_with(arg, "--cpp_file=")) {
+      auto relpath = msys_make_relative_path(ctx, arg.substr(11));
+      state.input_files.emplace_back(relpath);
+      return Statistic::none;
+    }
 
-  if ((arg == "--preproc_dependency") || (util::starts_with(arg, "-ppd"))) { // for ti_compiler
-    args_info.generating_dependencies = true;
-    return Statistic::none;
-  }
+    if (util::starts_with(arg, "--asm_file=")) {
+      auto relpath = msys_make_relative_path(ctx, arg.substr(11));
+      state.input_files.emplace_back(relpath);
+      return Statistic::none;
+    }
 
-  if ((arg == "-ppo") || (arg == "--preproc_only") ||
-      (arg == "-ppc") || (arg == "--preproc_with_comment") ||
-      (arg == "-ppl") || (arg == "--preproc_with_line")) { // for ti_compiler
-    state.add_common_arg(args[i]);
-    return Statistic::called_for_preprocessing;
+    if (util::starts_with(arg, "--output_file=")) {
+      auto relpath = msys_make_relative_path(ctx, arg.substr(14));
+      args_info.output_obj = relpath;
+      return Statistic::none;
+    }
+
+    if (util::starts_with(arg, "--include_path=")) {
+      auto relpath = msys_make_relative_path(ctx, arg.substr(15));
+      state.add_common_arg(FMT("--include_path={}", relpath));
+      return Statistic::none;
+    }
+
+    if (util::starts_with(arg, "-ppa") || //
+        util::starts_with(arg, "--preproc_with_compile")) {
+      // ignore this option
+      return Statistic::none;
+    }
+
+    if (util::starts_with(arg, "-ppd=") || //
+        util::starts_with(arg, "--preproc_dependency=")) {
+      auto dep_file =
+        (util::starts_with(arg, "--preproc_dependency=") ? arg.substr(21)
+                                                         : arg.substr(5));
+      auto relpath = msys_make_relative_path(ctx, dep_file);
+      args_info.output_dep = relpath;
+      args_info.generating_dependencies = true;
+      state.output_dep_origin = OutputDepOrigin::wp;
+      state.found_md_or_mmd_opt = true;
+
+      state.add_compiler_only_arg_no_hash("--preproc_with_compile");
+      state.add_compiler_only_arg_no_hash(
+        FMT("--preproc_dependency={}", args_info.output_dep));
+      return Statistic::none;
+    }
+
+    if ((arg == "-ppo") || (arg == "--preproc_only") ||         //
+        (arg == "-ppc") || (arg == "--preproc_with_comment") || //
+        (arg == "-ppl") || (arg == "--preproc_with_line"))      //
+    {
+      state.add_common_arg(args[i]);
+      return Statistic::called_for_preprocessing;
+    }
   }
 
   if (config.is_compiler_group_msvc()) {
