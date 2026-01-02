@@ -235,11 +235,12 @@ make_mswin_path(const fs::path& path)
 }
 
 fs::path
-msys_relative_path(const Context& ctx, const fs::path& path)
+my_relative_path(const Context& ctx, const fs::path& path)
 {
-  const std::string& cwd_str = util::pstr(ctx.actual_cwd).str();
+  const std::string cwd_str = ctx.actual_cwd.string();
   if (cwd_str.length() >= 5) { // check mimimum length
-    auto pos2 = cwd_str.find('/', 4);
+    const char path_delim = (char)fs::path::preferred_separator;
+    auto pos2 = cwd_str.find(path_delim, 4);
     if (pos2 != std::string::npos) {
       auto cwd_path_start = cwd_str.substr(0, pos2 + 1);
       if (util::starts_with(util::pstr(path).str(), cwd_path_start)) {
@@ -253,18 +254,25 @@ msys_relative_path(const Context& ctx, const fs::path& path)
 }
 
 fs::path
-msys_make_relative_path(const Context& ctx, const fs::path& path)
+my_make_relative_path(const Context& ctx, const fs::path& path)
 {
+#ifdef _WIN32
+  auto normalized_path = make_normal_path(path);
+  auto mswin_path = make_mswin_path(normalized_path);
+  return my_relative_path(ctx, mswin_path).generic_string();
+#else
   auto normalized_path = make_normal_path(path);
   if (is_mswin_path_abs(util::pstr(normalized_path).str())) {
     // if given path is a mswin absolute path, convert it to msys-style.
-    auto msys_path = make_msys_path(path);
-    auto relpath = msys_relative_path(ctx, msys_path);
+    auto msys_path = make_msys_path(normalized_path);
+    // convert to relative path
+    auto relpath = my_relative_path(ctx, msys_path);
     // convert back to mswin-style.
     return make_mswin_path(relpath);
   } else {
-    return msys_relative_path(ctx, normalized_path);
+    return my_relative_path(ctx, normalized_path);
   }
+#endif
 }
 
 bool
@@ -733,31 +741,31 @@ process_option_arg(const Context& ctx,
     }
 
     if (util::starts_with(arg, "--c_file=")) {
-      auto relpath = msys_make_relative_path(ctx, arg.substr(9));
+      auto relpath = my_make_relative_path(ctx, arg.substr(9));
       state.input_files.emplace_back(relpath);
       return Statistic::none;
     }
 
     if (util::starts_with(arg, "--cpp_file=")) {
-      auto relpath = msys_make_relative_path(ctx, arg.substr(11));
+      auto relpath = my_make_relative_path(ctx, arg.substr(11));
       state.input_files.emplace_back(relpath);
       return Statistic::none;
     }
 
     if (util::starts_with(arg, "--asm_file=")) {
-      auto relpath = msys_make_relative_path(ctx, arg.substr(11));
+      auto relpath = my_make_relative_path(ctx, arg.substr(11));
       state.input_files.emplace_back(relpath);
       return Statistic::none;
     }
 
     if (util::starts_with(arg, "--output_file=")) {
-      auto relpath = msys_make_relative_path(ctx, arg.substr(14));
+      auto relpath = my_make_relative_path(ctx, arg.substr(14));
       args_info.output_obj = relpath;
       return Statistic::none;
     }
 
     if (util::starts_with(arg, "--include_path=")) {
-      auto relpath = msys_make_relative_path(ctx, arg.substr(15));
+      auto relpath = my_make_relative_path(ctx, arg.substr(15));
       state.add_common_arg(FMT("--include_path={}", relpath));
       return Statistic::none;
     }
@@ -773,7 +781,7 @@ process_option_arg(const Context& ctx,
       auto dep_file =
         (util::starts_with(arg, "--preproc_dependency=") ? arg.substr(21)
                                                          : arg.substr(5));
-      auto relpath = msys_make_relative_path(ctx, dep_file);
+      auto relpath = my_make_relative_path(ctx, dep_file);
       args_info.output_dep = relpath;
       args_info.generating_dependencies = true;
       state.output_dep_origin = OutputDepOrigin::wp;

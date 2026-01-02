@@ -1563,9 +1563,10 @@ get_result_key_from_cpp(Context& ctx, util::Args& args, Hash& hash)
       args.erase_with_prefix("--preproc_dependency");
       args.erase_with_prefix("-ppd");
       if (ctx.config.keep_comments_cpp()) {
+        args.erase_with_prefix("-C"); // maybe this was added before
         args.push_back("--preproc_with_comment");
       }
-      args.push_back("--preproc_with_line");
+      args.push_back("--preproc_only");
       args.push_back(FMT("--output_file={}", preprocessed_path));
     } else {
       args.push_back("-E");
